@@ -97,19 +97,21 @@ rast_end <- raster::merge(rast1, rast2)
 
 # Extract
 
-vals <- terra::extract(rast_end, buildings_val25, fun=max, na.rm=TRUE, method="simple")
+valsinit <- terra::extract(rast_end, buildings_val25, fun=max, na.rm=TRUE, method="simple")
 
-terra::extr
+vals <- valsinit
+
 vals[vals==-Inf] <- NA
 
 buildings_val25$elev <- vals
 
 # encontrar breaks
 
-custom_breaks <- c(0, seq(1880, 2020, 10))
+
+custom_breaks <- c(0, seq(5, 40, 5),1000)
 
 br <-
-  classIntervals(buildings_val25$year, 20, "fixed", fixedBreaks = custom_breaks)
+  classIntervals(buildings_val25$elev, 20, "fixed", fixedBreaks = custom_breaks)
 
 br
 
@@ -125,7 +127,7 @@ lab
 
 # categorizar el año
 buildings_val25 <- mutate(buildings_val25,
-                          yr_cl = cut(year, br$brks, labels = lab, include.lowest = TRUE))
+                          yr_cl = cut(elev, br$brks, labels = lab, include.lowest = TRUE))
 
 # Get levels and add "Sin Dato"
 levels <- levels(buildings_val25$yr_cl)
@@ -144,14 +146,14 @@ g2 <- ggplot(buildings_val25) +
   #geom_sf(data = point_bf, fill = NA, col = "grey20", alpha = .9) +
   scale_fill_manual(
     values = c(hcl.colors(length(lab), palette = "Spectral"), "grey50"),
-    guide = guide_legend(keywidth = .5, keyheight = .7),
+    guide = guide_legend(keywidth = .5, keyheight = 1.2),
     na.value = "grey50",
     drop = FALSE
   ) +
   theme_void() +
   labs(title = "Granada",
-       fill = "",
-       caption = " Code based on Dominic Roye (@dr_xeo) | Data: Catastro") +
+       fill = "Altura (m)",
+       caption = " Code based on Dominic Roye (@dr_xeo) | Data: Catastro, IGN") +
   theme(
     plot.title = element_text(hjust = .5, colour = "white",
                               family = "Montserrat",
@@ -167,6 +169,12 @@ g2 <- ggplot(buildings_val25) +
       family = "Montserrat",
       margin = margin(b = 10)
     ),
+    legend.title =  element_text(
+      colour = "white",
+      margin = margin(r = 10),
+      size = 30,
+      family = "Montserrat"
+    ),
     legend.text = element_text(
       colour = "white",
       margin = margin(r = 10),
@@ -178,4 +186,5 @@ g2 <- ggplot(buildings_val25) +
 
 g2
 
-ggsave("./buildings_old/granada.png", g2, width = 7, height = 7)
+ggsave("./buildings_old/granada_elev.png", g2, width = 7, height = 7)
+knitr::plot_crop("./buildings_old/granada_elev.png")
