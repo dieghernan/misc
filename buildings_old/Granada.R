@@ -52,13 +52,18 @@ temp <- tempfile()
 download.file(URLencode(val_link), temp)
 
 # descomprimimos a una carpeta llamda buildings
-unzip(temp, exdir = "buildings_old")
+unzip(temp, exdir = "~/R/mapslib/misc")
 
 # obtenemos la ruta con el archivo
-file_val <- dir_ls("buildings_old", regexp = "18900.building.gml")
 
-# importamos los datos
+file <- list.files("~/R/mapslib/misc")
+filename <- file[str_detect(file,"18900.building.gml")]
+
+file_val <- file.path("~/R/mapslib/misc", filename)
+
+# importamos los datos----
 buildings_val <- st_read(file_val)
+
 
 
 buildings_val <- mutate(buildings_val,
@@ -84,7 +89,7 @@ filter(buildings_val, beginning >= "10-01-01") %>%
 point_bf <- geo("Granada, Spain") %>%
   st_as_sf(coords = c("long", "lat"), crs = st_crs(4326)) %>%
   st_transform(25830) %>%
-  st_buffer(1500) %>%
+  st_buffer(2500) %>%
   st_transform(st_crs(buildings_val))
 
 buildings_val25 <- st_intersection(buildings_val, point_bf)
@@ -136,7 +141,7 @@ g2 <- ggplot(buildings_val25) +
   #geom_sf(data = point_bf, fill = NA, col = "grey20", alpha = .9) +
   scale_fill_manual(
     values = c(hcl.colors(length(lab), palette = "Spectral"), "grey50"),
-    guide = guide_legend(keywidth = .5, keyheight = .7),
+    guide = guide_legend(keywidth = .5, keyheight = 1, ncol=1),
     na.value = "grey50",
     drop = FALSE
   ) +
@@ -171,3 +176,4 @@ g2 <- ggplot(buildings_val25) +
 g2
 
 ggsave("./buildings_old/granada.png", g2, width = 7, height = 7)
+knitr::plot_crop("./buildings_old/granada.png")

@@ -12,7 +12,7 @@ library(rvest)
 library(tidygeocoder)
 
 #descarga de familia tipográfica
-#sysfonts::font_add_google("Montserrat", "Montserrat")
+sysfonts::font_add_google("Montserrat", "Montserrat")
 
 #usar showtext para familias tipográficas
 showtext::showtext_auto()
