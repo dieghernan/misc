@@ -1,0 +1,129 @@
+---
+title: "leaflet"
+author: "dieghernan"
+date: "21/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Leaflet
+
+Create your leaflet. If you don't want to print the code on the final
+report, use the parameter `echo=FALSE` 
+```{r leaflet, echo=FALSE}
+
+library(mapSpain)
+library(leaflet)
+library(readxl)
+library(sf)
+library(tmap)
+library(dplyr)
+
+# Descargamos datos INE --------
+
+url <- "https://www.ine.es/pob_xls/pobmun.zip"
+tmpzip <- tempfile(fileext = ".zip")
+download.file(url, tmpzip)
+
+# Inspeccionamos los archivos que hay dentro
+unzip(tmpzip, list = TRUE)
+
+# Extraemos del zip al directorio temporal y cargamos archivos
+unzip(tmpzip, exdir = tempdir())
+
+# Cargamos archivos 2000 y 2020
+
+ine2000 <-
+  read_excel(file.path(tempdir(), "pobmun00.xls"), skip = 1) %>%
+  mutate(LAU_CODE = paste0(CPRO, CMUN),
+         pop = POB00) %>%
+  select(LAU_CODE, NOMBRE, pop)
+
+ine2020 <-
+  read_excel(file.path(tempdir(), "pobmun20.xlsx"), skip = 1) %>%
+  mutate(LAU_CODE = paste0(CPRO, CMUN),
+         pop = POB20) %>%
+  select(LAU_CODE, NOMBRE, pop)
+
+
+ine2000_cross <-
+  ine2000 %>% mutate(pop00 = pop) %>% select(LAU_CODE, pop00)
+
+inevars <- ine2020 %>% left_join(ine2000_cross) %>%
+  mutate(var = 100 * (pop / pop00 - 1))
+
+# Reemplazo NAs por 1
+inevars[is.na(inevars$var), "var"] <- 100
+
+# Shape
+
+munic_20 <- esp_get_munic_siane(2020, epsg = 4326)
+
+
+# Pegar al mapa 2020
+munic_var <- munic_20 %>% left_join(inevars) 
+
+bins <-   
+  unique(c(seq(-100, 0, 10), seq(0, 100, 25), 500, 1000, 1500, 2000, Inf))
+
+
+pal <-
+  colorBin("RdYlBu",
+    domain = munic_var$var,
+    bins = bins,
+    reverse = TRUE
+  )
+
+
+labels <- sprintf(
+  "<strong>%s</strong><br/>Variation of pop %s %%",
+  munic_var$name,
+  munic_var$var
+) %>% lapply(htmltools::HTML)
+
+
+leaflet() %>%
+  setView(
+    lng = -3.684444,
+    lat = 40.308611,
+    zoom = 6
+  ) %>%
+  addProviderEspTiles("IGNBase.Gris") %>%
+  addPolygons(
+    data = munic_var,
+    fillColor = ~ pal(var),
+    fillOpacity = 0.6,
+    color = "#44444",
+    weight = 0.5,
+    smoothFactor = .1,
+    opacity = 1,
+    highlightOptions = highlightOptions(
+      color = "white",
+      weight = 1,
+      bringToFront = TRUE
+    ),
+    popup = labels
+  ) %>%
+  addLegend(
+    pal = pal,
+    values = bins,
+    opacity = 0.7, title = "<small>Ratio of change in pop (2000-2020)</small>",
+    position = "bottomright"
+  )
+
+
+```
+
