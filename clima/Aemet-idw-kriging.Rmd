@@ -1,0 +1,423 @@
+
+# IDW y Kriging
+
+```{r}
+library(remotes)
+#install_github("ropenspain/climaemet")
+```
+
+```{r}
+library(climaemet)
+
+## Get api key from AEMET
+#browseURL("https://opendata.aemet.es/centrodedescargas/obtencionAPIKey")
+
+## Use this function to register your API Key temporarly or permanently
+# aemet_api_key("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJnZW1hLmZhdmlsZXNAdWNsbS5lcyIsImp0aSI6IjI2OTBjYmJlLTY0YmQtNDc1NS1hYWU4LTAzNjg4ODY0YjJhMiIsImlzcyI6IkFFTUVUIiwiaWF0IjoxNjIxOTM3NDIwLCJ1c2VySWQiOiIyNjkwY2JiZS02NGJkLTQ3NTUtYWFlOC0wMzY4ODg2NGIyYTIiLCJyb2xlIjoiIn0.ad5qztXch-G3SLI63N9Q7_5vjK-OvDPEGR2B0P2iFe4", install = TRUE, overwrite=TRUE)
+```
+
+
+
+```{r}
+stations <- aemet_stations() # Need to have the API Key registered
+
+knitr::kable(head(stations))
+#View(stations)
+```
+
+
+```{r}
+station <- "3195" # Retiro (Madrid)
+
+## Get last observation values for a station
+data_observation <- aemet_last_obs(station)
+
+knitr::kable(head(data_observation))
+```
+
+```{r}
+## Get daily/annual climatology values for a station
+data_daily <-
+  aemet_daily_clim(station, start = "2020-01-01", end = "2020-12-31")
+
+knitr::kable(head(data_daily))
+```
+
+
+
+
+```{r}
+library(ggplot2)
+# Plot a windrose showing the wind speed and direction for a station over a days period.
+windrose_days(
+  station,
+  start = "2010-01-01",
+  end = "2020-12-31",
+  n_speeds = 5,
+  speed_cuts = c(2.5, 5, 7.5, 10, 12.5, 15)
+) +
+  theme(plot.title = element_text(size = 10))
+```
+
+
+# … and spatial!
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+all_stations <- aemet_last_obs(return_sf = TRUE)
+
+# Last hour
+all_last <-
+  all_stations %>% filter(fint == all_stations[["fint"]][1])
+
+ggplot(all_last) +
+  geom_sf(aes(col = ta, stroke = 0, geometry = geometry),
+    shape = 19,
+    size = 2) +
+  labs(col = "Max temp.") +
+  scale_colour_gradientn(colours = hcl.colors(5, "RdBu", rev = TRUE)) +
+  theme_bw() +
+  theme(panel.border = element_blank())
+```
+
+
+
+```{r}
+
+library(climaemet)
+library(mapSpain) # Base maps of Spain
+library(raster) # raster handling
+library(sf) # spatial shape handling
+library(gstat) # for spatial interpolation
+library(dplyr) # data handling
+library(ggplot2) # for plots
+library(gifski) # we would create an animation
+```
+
+```{r}
+
+clim_data <- aemet_daily_clim(
+  start = "2020-12-21",
+  end = "2021-03-20",
+  return_sf = TRUE
+)
+
+clim_data_clean <- clim_data %>%
+  # Exclude Canary Islands from analysis
+  filter(!provincia %in% c("LAS PALMAS", "STA. CRUZ DE TENERIFE")) %>%
+  dplyr::select(fecha, tmed) %>%
+  # Exclude NAs
+  filter(!is.na(tmed))
+
+summary(clim_data_clean$tmed)
+#>    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#> -15.200   6.100   9.500   8.877  12.200  25.000
+
+ggplot(clim_data_clean) +
+  geom_sf()
+```
+
+
+```{r}
+
+CCAA <- esp_get_ccaa(epsg = 4326) %>%
+  # Exclude Canary Islands from analysis
+  filter(ine.ccaa.name != "Canarias")
+
+ggplot(CCAA) +
+  geom_sf() +
+  geom_sf(data = clim_data_clean)
+```
+
+
+
+```{r}
+clim_data_utm <- st_transform(clim_data_clean, 25830)
+CCAA_utm <- st_transform(CCAA, 25830)
+
+# Note the original projection
+
+st_crs(CCAA)$proj4string
+#> [1] "+proj=longlat +datum=WGS84 +no_defs"
+
+# vs the utm projection
+
+st_crs(CCAA_utm)$proj4string
+#> [1] "+proj=utm +zone=30 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+```
+
+
+```{r}
+
+# Create grid 5*5 km (25 km2)
+
+grd_sf <- st_as_sfc(st_bbox(CCAA_utm)) %>%
+  st_make_grid(cellsize = 5000, what = "centers")
+
+# Number of points
+
+length(grd_sf)
+#> [1] 44426
+
+# Convert to sp object - interpolation should be made with sp/raster
+grd <- as(grd_sf, "Spatial") %>% as("SpatialPixels")
+```
+
+
+```{r}
+
+# Test with a single day
+
+test_day <- clim_data_utm %>% filter(fecha == "2021-01-08")
+
+# Interpolate temp
+
+interp_temp <-  gstat::idw(tmed ~ 1,
+                           # Formula interpolation
+                           as(test_day, "Spatial"),
+                           # Origin
+                           newdata = grd,
+                           # Destination
+                           idp = 2.0)
+#> [inverse distance weighted interpolation]
+
+
+
+interp_temp_rast <- raster(interp_temp) %>%
+  mask(CCAA_utm)
+
+plot(interp_temp_rast, axes = FALSE)
+```
+
+
+
+#IDW
+```{r, eval=FALSE}
+
+# DHH: Esta parte no corre, no tengo my.data ni grid.xy
+# inverse distances:
+mydata.idw <- krige(z~1, mydata.gstat, grid.xy)
+
+spplot(mydata.idw["var1.pred"], main = "pred")
+spplot(mydata.idw["var1.var"], main = "var")
+
+# To raster and mask the grid to the shape of Spain ?? o algo más bonito
+```
+
+
+# Deterministic methods (IDW).... no, better Stochastics (like kriging)
+```{r}
+# Prepare the data 
+# Change to sp for this analysis
+test_day_sp <- as(test_day,"Spatial")
+
+# Remove duplicate locations
+zd <- zerodist(test_day_sp)
+
+# remove the duplicate rows:
+test_day_sp2 <- test_day_sp[-zd[,2], ]
+zerodist(test_day_sp2)
+
+library(classInt)
+
+# Spatial Exploratory Analysis (Esto aquí o antes de IDW)
+
+# Hago algo parecido pero con ggplot2
+
+# Una vez que he quitado los duplicados, vuelvo a pasar a sf
+test_day_sf2 <- st_as_sf(test_day_sp2)
+
+# Y me quedo solo con los datos (quito la geometria)
+test_day_df2 <- st_drop_geometry(test_day_sf2)
+
+
+# Distribución
+
+ggplot(test_day_df2, aes(x=tmed)) + 
+geom_histogram(aes(y=..density..),alpha=.5, position="identity", binwidth = 1) + 
+geom_density(alpha=.3) +
+  theme_light()
+
+# Bubble plot, con el objeto sf
+#https://r-charts.com/es/espacial/mapa-simbolos-proporcionales-ggplot2/
+
+# Ordeno por tamaño
+test_day_sf2 <- test_day_sf2[order(test_day_sf2$tmed, decreasing = TRUE), ]
+
+# Creo quartiles y categorizo
+cuart <- classIntervals(test_day_sf2$tmed, n=4)
+test_day_sf2$quart <- cut(test_day_sf2$tmed, breaks= cuart$brks, labels=FALSE)
+
+ggplot() +
+  geom_sf(
+    data = test_day_sf2,
+    pch = 21,
+    aes(size = quart, fill = quart),
+    col = "grey20") +
+  scale_size(
+    range = c(2, 8),
+    labels = function(x) paste0("Q",x),
+    guide = guide_legend()) +
+  scale_fill_gradientn(colours = hcl.colors(5, "RdBu",
+                                            rev = TRUE,
+                                            alpha = 0.7),
+                       labels = function(x) paste0("Q",x)) +
+  guides(fill = guide_legend(title = "")) +
+labs(title = "Quartil Map of Avg. Temperature in Spain",
+     size = "") 
+
+
+# Igual hay otra forma más corta de hacerlo pero yo tengo un poco de lío con los objetos y
+# lo hago todo "entendible" para mi.
+library(geoR)
+z=test_day_sp2$tmed
+sf::st_crs(test_day_sp2)
+
+xy=st_coordinates(st_as_sfc(test_day_sp2))
+xy=as.data.frame(xy)
+lon=xy [ ,1]
+lat=xy [ ,2]
+
+coord=cbind(lon,lat)
+mydata.geo=as.data.frame(cbind(coord, z))
+mydata<-as.geodata(obj=mydata.geo, coords.col = 1:2, data.col = 3)
+plot(mydata) #Look the histogram, the dataset is gaussian!! Note that kriging is BLUP
+
+points(mydata, pt.divide = "quartiles", xlab = "Longitude", ylab = "Latitude",
+        main = "Quartil Map of Avg. Temperature in Spain", cex.max = 2) 
+
+# Fit the semivariogram by eye
+vgm=variogram(tmed~1, test_day_sp2) #
+plot(vgm)
+fit.var = fit.variogram(vgm, model = vgm(0, "Sph", 559459.46, 33.11))
+fit.var
+# Plot empirical (dots) and theoretical semivariograms (line)
+plot(vgm, fit.var, col=2)
+
+# Compute ordinary kriging and plot the results
+kriged = krige(tmed~1, test_day_sp2, grd, model = fit.var)
+spplot(kriged["var1.pred"])
+spplot(kriged["var1.var"])
+
+```
+
+
+
+## ----------- HASTA AQUÍ TODO BIEN ----------------
+```{r}
+
+# Mapas mas bonitos
+
+
+#DHH Creamos un mapa con ggplot2
+
+idw_df <- as.data.frame(interp_temp, xy = TRUE, na.rm = TRUE)
+
+# Cortes para hacer choropleth
+library(classInt)
+breaks_idw <- classIntervals(idw_df$var1.pred, style="pretty", n=7)
+
+
+
+ggplot() +
+  geom_tile(data = idw_df, aes(x = coords.x1, y = coords.x2, fill = var1.pred)) +
+  geom_sf(data = CCAA_utm, col = "black", fill = NA) +
+  scale_fill_gradientn(
+    limits=c(-10,18),
+    colours = hcl.colors(11, "RdBu", rev = TRUE, alpha = 0.7),
+    breaks = breaks_idw$brks,
+    labels = function(x)
+      paste0(x, "º"),
+    guide = guide_legend(reverse = TRUE, title = "Temperatura")
+  ) +
+  theme(panel.background =  element_blank(),
+        axis.title = element_blank()) +
+  labs(title="Temperaturas en España",
+       subtitle = "Interpoladas con IDW",
+       caption = "Datos: AEMET, IGN")
+
+# para krigged
+kriged_df <- as.data.frame(kriged, xy = TRUE, na.rm = TRUE)
+
+#OJO, reutilizo breaks idw para hacerlo comparable
+ggplot() +
+  geom_tile(data = kriged_df, aes(x = coords.x1, y = coords.x2, fill = var1.pred)) +
+  geom_sf(data = CCAA_utm, col = "black", fill = NA) +
+  scale_fill_gradientn(
+    limits=c(-10,18),
+    colours = hcl.colors(11, "RdBu", rev = TRUE, alpha = 0.7),
+    breaks = breaks_idw$brks,
+    labels = function(x)
+      paste0(x, "º"),
+    guide = guide_legend(reverse = TRUE, title = "Temperatura")
+  ) +
+  theme(panel.background =  element_blank(),
+        axis.title = element_blank()) +
+  labs(title="Temperaturas en España",
+       subtitle = "Interpoladas con Kriged",
+       caption = "Datos: AEMET, IGN")
+
+
+ggplot() +
+  geom_tile(data = kriged_df, aes(x = coords.x1, y = coords.x2, fill = var1.var)) +
+  geom_sf(data = CCAA_utm, col = "black", fill = NA) +
+  geom_sf(data=test_day_sf2, col="black",  pch=3) +
+  scale_fill_gradientn(
+    # Creamos una paleta especial
+    colours = c("green4","white",hcl.colors(20, "Reds",alpha = .7, rev = TRUE)),
+    breaks=c(0,3,4,5,10,20, 30),
+    guide = guide_legend(reverse = TRUE, title = "Varianza"
+                         )
+  ) +
+  theme(panel.background =  element_blank(),
+        axis.title = element_blank(),
+        plot.tag.position = c(.8,.2),
+        plot.tag = element_text(hjust =-.3, size=9)) +
+  labs(title="Temperaturas en España",
+       subtitle = "Varianza del estimador krige",
+       caption = "Datos: AEMET, IGN",
+       tag = "+ Estaciones AEMET")
+
+```
+
+
+
+
+```{r}
+
+# Making a nice plot on ggplot2
+temp_values <- as.data.frame(interp_temp, xy = TRUE, na.rm = TRUE)
+names(temp_values) <- c("x", "y", "temp")
+
+# Get min and max from interpolated values
+min_temp <- floor(min(temp_values$temp))
+max_temp <- ceiling(max(temp_values$temp))
+
+ggplot() +
+  geom_sf(data = CCAA_utm, fill = "grey95") +
+  geom_tile(data = temp_values, aes(x = x, y = y, fill = temp)) +
+  scale_fill_gradientn(
+    colours = hcl.colors(11, "Spectral", rev = TRUE, alpha = 0.7),
+    limits = c(min_temp, max_temp)
+  ) +
+  theme_minimal() +
+  ylab(NULL) +
+  xlab(NULL) +
+  labs(
+    title = "Avg. Temperature in Spain",
+    subtitle = "2021-01-08",
+    caption = "Data: AEMET, IGN",
+    fill = "C"
+  )
+```
+
+
+
+
+
+
+
+
+

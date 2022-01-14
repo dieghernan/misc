@@ -1,0 +1,259 @@
+
+# IDW y Kriging
+
+```{r}
+library(remotes)
+#install_github("ropenspain/climaemet")
+```
+
+```{r}
+library(climaemet)
+
+```
+
+
+
+```{r}
+stations <- aemet_stations() # Need to have the API Key registered
+
+knitr::kable(head(stations))
+View(stations)
+```
+
+
+```{r}
+station <- "3195" # Retiro (Madrid)
+
+## Get last observation values for a station
+data_observation <- aemet_last_obs(station)
+
+knitr::kable(head(data_observation))
+```
+
+```{r}
+## Get daily/annual climatology values for a station
+data_daily <-
+  aemet_daily_clim(station, start = "2020-01-01", end = "2020-12-31")
+
+knitr::kable(head(data_daily))
+```
+
+
+
+
+```{r}
+library(ggplot2)
+# Plot a windrose showing the wind speed and direction for a station over a days period.
+windrose_days(
+  station,
+  start = "2010-01-01",
+  end = "2020-12-31",
+  n_speeds = 5,
+  speed_cuts = c(2.5, 5, 7.5, 10, 12.5, 15)
+) +
+  theme(plot.title = element_text(size = 10))
+```
+
+
+# … and spatial!
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+all_stations <- aemet_last_obs(return_sf = TRUE)
+
+# Last hour
+all_last <-
+  all_stations %>% filter(fint == all_stations[["fint"]][1])
+
+ggplot(all_last) +
+  geom_sf(aes(col = ta, stroke = 0, geometry = geometry),
+    shape = 19,
+    size = 2) +
+  labs(col = "Max temp.") +
+  scale_colour_gradientn(colours = hcl.colors(5, "RdBu", rev = TRUE)) +
+  theme_bw() +
+  theme(panel.border = element_blank())
+```
+
+
+
+```{r}
+
+library(climaemet)
+library(mapSpain) # Base maps of Spain
+library(raster) # raster handling
+library(sf) # spatial shape handling
+library(gstat) # for spatial interpolation
+library(dplyr) # data handling
+library(ggplot2) # for plots
+library(gifski) # we would create an animation
+```
+
+```{r}
+
+clim_data <- aemet_daily_clim(
+  start = "2020-12-21",
+  end = "2021-03-20",
+  return_sf = TRUE
+)
+
+clim_data_clean <- clim_data %>%
+  # Exclude Canary Islands from analysis
+  filter(!provincia %in% c("LAS PALMAS", "STA. CRUZ DE TENERIFE")) %>%
+  dplyr::select(fecha, tmed) %>%
+  # Exclude NAs
+  filter(!is.na(tmed))
+
+summary(clim_data_clean$tmed)
+#>    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#> -15.200   6.100   9.500   8.877  12.200  25.000
+
+ggplot(clim_data_clean) +
+  geom_sf()
+```
+
+
+```{r}
+
+CCAA <- esp_get_ccaa(epsg = 4326) %>%
+  # Exclude Canary Islands from analysis
+  filter(ine.ccaa.name != "Canarias")
+
+ggplot(CCAA) +
+  geom_sf() +
+  geom_sf(data = clim_data_clean)
+```
+
+
+
+```{r}
+clim_data_utm <- st_transform(clim_data_clean, 25830)
+CCAA_utm <- st_transform(CCAA, 25830)
+
+# Note the original projection
+
+st_crs(CCAA)$proj4string
+#> [1] "+proj=longlat +datum=WGS84 +no_defs"
+
+# vs the utm projection
+
+st_crs(CCAA_utm)$proj4string
+#> [1] "+proj=utm +zone=30 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+```
+
+
+```{r}
+
+# Create grid 5*5 km (25 km2)
+
+grd_sf <- st_as_sfc(st_bbox(CCAA_utm)) %>%
+  st_make_grid(cellsize = 5000, what = "centers")
+
+# Number of points
+
+length(grd_sf)
+#> [1] 44426
+
+# Convert to sp object - interpolation should be made with sp/raster
+grd <- as(grd_sf, "Spatial") %>% as("SpatialPixels")
+```
+
+
+```{r}
+
+# Test with a single day
+
+test_day <- clim_data_utm %>% filter(fecha == "2021-01-08")
+
+
+# Interpolate temp
+
+interp_temp <-  gstat::idw(tmed ~ 1,
+                           # Formula interpolation
+                           as(test_day, "Spatial"),
+                           # Origin
+                           newdata = grd,
+                           # Destination
+                           idp = 2.0)
+#> [inverse distance weighted interpolation]
+
+# To raster and mask the grid to the shape of Spain
+interp_temp <- raster(interp_temp) %>%
+  mask(CCAA_utm)
+
+plot(interp_temp, axes = FALSE)
+
+# ------------------ #
+# Kriging con gstat
+# ------------------ #
+test_day_sp <- as(test_day,"Spatial")
+
+# https://gis.stackexchange.com/questions/222192/r-gstat-krige-covariance-matrix-singular-at-location-5-88-47-4-0-skipping
+# Duplicates
+sp::zerodist(test_day_sp)
+
+zd <- zerodist(test_day_sp)
+# remove the duplicate rows:
+test_day_sp2 <- test_day_sp[-zd[,2], ]
+
+zerodist(test_day_sp2)
+# hasta aqui
+vgm=variogram(tmed~1, test_day_sp2)
+
+# habría que reajustar el modelo
+fit.var = fit.variogram(vgm, model = vgm("Exp"))
+plot(vgm, fit.var)
+
+kriged = krige(tmed~1, test_day_sp2, grd, model = fit.var)
+
+spplot(kriged["var1.pred"])
+spplot(kriged["var1.var"])
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+
+# Making a nice plot on ggplot2
+temp_values <- as.data.frame(interp_temp, xy = TRUE, na.rm = TRUE)
+names(temp_values) <- c("x", "y", "temp")
+
+# Get min and max from interpolated values
+min_temp <- floor(min(temp_values$temp))
+max_temp <- ceiling(max(temp_values$temp))
+
+ggplot() +
+  geom_sf(data = CCAA_utm, fill = "grey95") +
+  geom_tile(data = temp_values, aes(x = x, y = y, fill = temp)) +
+  scale_fill_gradientn(
+    colours = hcl.colors(11, "Spectral", rev = TRUE, alpha = 0.7),
+    limits = c(min_temp, max_temp)
+  ) +
+  theme_minimal() +
+  ylab(NULL) +
+  xlab(NULL) +
+  labs(
+    title = "Avg. Temperature in Spain",
+    subtitle = "2021-01-08",
+    caption = "Data: AEMET, IGN",
+    fill = "C"
+  )
+```
+
+
+
+
+
+
+
+
+
