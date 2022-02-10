@@ -186,5 +186,6 @@ g2 <- ggplot(buildings_val25) +
 
 g2
 
+
 ggsave("./buildings_old/granada_elev.png", g2, width = 7, height = 7)
 knitr::plot_crop("./buildings_old/granada_elev.png")
