@@ -1,0 +1,40 @@
+======================
+MAPAS INE A 01-01-2003
+======================
+
+Se han instalado en su sistema los archivos de mapas 
+necesarios para representar datos datos estadísticos del INE
+usando conjuntamente los programas "PCAxis2001" y "PXMap2001"
+o versiones posteriores.
+
+Estos mapas se refieren a las delimitaciones territoriales
+vigentes al 1 de enero de 2003.
+
+Han sido instalados archivos para representar:
+
+- España por Comunidades Autónomas (límites detallados y simplificados)
+- España por Provincias (límites detallados y simplificados)
+- España, cada Comunidad Autónoma y cada província por municipios
+
+IMPORTANTE: Durante el proceso de instalación es necesario que
+haya aceptado el directorio por defecto que ese proceso
+le ha propuesto que es:
+
+c:\Archivos de programa\PX-Map\Maps
+
+De este modo los programas encontrarán los archivos
+de mapas y podrán representarlos.
+
+Proximamente estará disponible en la web del INE
+"www.ine.es" una página con las últimas actualizaciones
+de los archivos de mapas distribuidos.
+
+El usuario no está autorizado a redistribuir
+estos archivos sin previa autorización del INE, lo que 
+ha aceptado al proceder a su instalación.
+
+Copyright INE 2004
+Madrid, Abril de 2004.
+
+Instituto Nacional de Estadística
+www.ine.es
